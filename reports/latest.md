@@ -1,3 +1,3 @@
-# Sync Report
+# 同步报告
 
-Waiting for the first sync.
+等待首次同步。

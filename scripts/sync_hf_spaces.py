@@ -12,18 +12,44 @@ from pathlib import Path
 from huggingface_hub import HfApi, snapshot_download
 
 
+def parse_tokens(raw: str):
+    raw = raw.strip()
+    if not raw:
+        return []
+
+    if "," in raw:
+        parts = raw.split(",")
+    else:
+        parts = raw.split()
+
+    tokens = [part.strip() for part in parts if part.strip()]
+    return tokens
+
+
 def load_accounts(raw: str):
     if not raw:
-        raise ValueError("HF_ACCOUNTS_JSON is required and must be valid JSON.")
+        raise ValueError(
+            "需要提供 HF_ACCOUNTS_JSON，可为 JSON 或英文逗号分隔的 token 列表。"
+        )
 
-    data = json.loads(raw)
-    if isinstance(data, dict) and "accounts" in data:
-        accounts = data["accounts"]
+    raw = raw.strip()
+    accounts = None
+    if raw.startswith("{") or raw.startswith("["):
+        data = json.loads(raw)
+        if isinstance(data, dict) and "accounts" in data:
+            accounts = data["accounts"]
+        else:
+            accounts = data
     else:
-        accounts = data
+        tokens = parse_tokens(raw)
+        accounts = tokens
 
     if not isinstance(accounts, list):
-        raise ValueError("HF_ACCOUNTS_JSON must be a JSON array or {\"accounts\": [...]}.\n")
+        raise ValueError(
+            "HF_ACCOUNTS_JSON 必须是 JSON 数组、{\"accounts\": [...]} 或英文逗号分隔的 token 列表。"
+        )
+    if not accounts:
+        raise ValueError("HF_ACCOUNTS_JSON 未提供任何账号或 token。")
 
     normalized = []
     for item in accounts:
@@ -39,7 +65,7 @@ def load_accounts(raw: str):
             raise ValueError("Each account entry must be a token string or an object.")
 
         if not token:
-            raise ValueError("Each account must include a token.")
+        raise ValueError("每个账号都必须包含 token。")
 
         normalized.append(
             {
@@ -66,7 +92,7 @@ def resolve_account(api: HfApi, entry: dict):
 
     author = entry["username"] or whoami_name
     if not author:
-        raise ValueError("Unable to determine account name from token.")
+        raise ValueError("无法从 token 获取账号名称。")
 
     folder = entry["folder"] or author
     return author, safe_component(folder)
@@ -112,15 +138,15 @@ def write_report(report_path: Path, root_dir: Path, records: list):
     timestamp = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = []
-    lines.append("# Sync Report")
+    lines.append("# 同步报告")
     lines.append("")
-    lines.append(f"- Generated at: {timestamp}")
-    lines.append(f"- Root directory: `{root_dir.as_posix()}`")
+    lines.append(f"- 生成时间: {timestamp}")
+    lines.append(f"- 根目录: `{root_dir.as_posix()}`")
     lines.append(
-        f"- Total: {total} | Success: {success_count} | Empty: {empty_count} | Failed: {failure_count}"
+        f"- 总计: {total} | 成功: {success_count} | 空: {empty_count} | 失败: {failure_count}"
     )
     lines.append("")
-    lines.append("| Account | Space | Status | Synced Path |")
+    lines.append("| 账号 | Space | 状态 | 同步目录 |")
     lines.append("| --- | --- | --- | --- |")
 
     report_dir = report_path.parent
@@ -129,12 +155,12 @@ def write_report(report_path: Path, root_dir: Path, records: list):
         space_id = record.get("space_id") or "-"
         status = record["status"]
         if status == "success":
-            status_text = "Success"
+            status_text = "成功"
         elif status == "empty":
-            status_text = "No spaces"
+            status_text = "无 Space"
         else:
-            error = normalize_error(record.get("error") or "Unknown error")
-            status_text = f"Failed: {error}"
+            error = normalize_error(record.get("error") or "未知错误")
+            status_text = f"失败: {error}"
 
         if record.get("target_dir"):
             link_path = format_link(record["target_dir"], report_dir)
@@ -149,28 +175,28 @@ def write_report(report_path: Path, root_dir: Path, records: list):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sync Hugging Face Spaces into this repository.")
+    parser = argparse.ArgumentParser(description="同步 Hugging Face Spaces 到本仓库。")
     parser.add_argument(
         "--root",
         default=os.getenv("SYNC_ROOT", "spaces"),
-        help="Root folder for synced spaces.",
+        help="同步结果的根目录。",
     )
     parser.add_argument(
         "--report",
         default=os.getenv("SYNC_REPORT", "reports/latest.md"),
-        help="Path to write the sync report.",
+        help="同步报告输出路径。",
     )
     parser.add_argument(
         "--accounts-json",
         default=os.getenv("HF_ACCOUNTS_JSON") or os.getenv("HF_ACCOUNTS"),
-        help="JSON string describing accounts (from env HF_ACCOUNTS_JSON).",
+        help="账号配置的 JSON 字符串，或英文逗号分隔的 token 列表。",
     )
     args = parser.parse_args()
 
     try:
         accounts = load_accounts(args.accounts_json)
     except Exception as exc:
-        print(f"Config error: {exc}", file=sys.stderr)
+        print(f"配置错误: {exc}", file=sys.stderr)
         return 1
 
     api = HfApi()
@@ -200,7 +226,7 @@ def main():
                 {
                     "account": author,
                     "status": "failed",
-                    "error": f"Failed to list spaces: {normalize_error(exc)}",
+                    "error": f"无法获取 Space 列表: {normalize_error(exc)}",
                     "target_dir": None,
                 }
             )
@@ -244,7 +270,7 @@ def main():
                 )
 
     write_report(report_path, root_dir, records)
-    print(f"Sync report written to {report_path}")
+    print(f"同步报告已写入 {report_path}")
     return 0
 
 
