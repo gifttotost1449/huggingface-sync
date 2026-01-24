@@ -65,7 +65,7 @@ def load_accounts(raw: str):
             raise ValueError("Each account entry must be a token string or an object.")
 
         if not token:
-        raise ValueError("每个账号都必须包含 token。")
+            raise ValueError("每个账号都必须包含 token。")
 
         normalized.append(
             {
