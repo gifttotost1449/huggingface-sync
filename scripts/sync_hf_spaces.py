@@ -178,7 +178,7 @@ def main():
     parser = argparse.ArgumentParser(description="同步 Hugging Face Spaces 到本仓库。")
     parser.add_argument(
         "--root",
-        default=os.getenv("SYNC_ROOT", "spaces"),
+        default=os.getenv("SYNC_ROOT", "sync"),
         help="同步结果的根目录。",
     )
     parser.add_argument(
