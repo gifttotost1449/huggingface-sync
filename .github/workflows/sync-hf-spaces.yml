@@ -25,7 +25,7 @@ jobs:
       - name: Sync Spaces
         env:
           HF_ACCOUNTS_JSON: ${{ secrets.HF_ACCOUNTS_JSON }}
-          SYNC_ROOT: spaces
+          SYNC_ROOT: sync
           SYNC_REPORT: reports/latest.md
         run: python scripts/sync_hf_spaces.py
 
