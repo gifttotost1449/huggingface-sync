@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 
 from huggingface_hub import HfApi, snapshot_download
@@ -62,7 +63,7 @@ def load_accounts(raw: str):
             username = (item.get("username") or item.get("account") or item.get("user") or "").strip() or None
             folder = (item.get("folder") or "").strip() or None
         else:
-            raise ValueError("Each account entry must be a token string or an object.")
+            raise ValueError("账号配置必须是 token 字符串或对象。")
 
         if not token:
             raise ValueError("每个账号都必须包含 token。")
@@ -137,39 +138,85 @@ def write_report(report_path: Path, root_dir: Path, records: list):
 
     timestamp = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    report_dir = report_path.parent
+    account_groups = defaultdict(list)
+    for record in records:
+        account_groups[record["account"]].append(record)
+
+    accounts_sorted = sorted(account_groups.keys(), key=lambda name: name.lower())
+
+    def record_sort_key(record: dict):
+        space_id = record.get("space_id") or ""
+        is_summary = space_id in ("", "-")
+        return (0 if is_summary else 1, space_id.lower())
+
+    def format_space_name(space_id: str) -> str:
+        if "/" in space_id:
+            return space_id.split("/", 1)[1]
+        return space_id
+
+    def format_target_link(target_dir: Path | None):
+        if not target_dir:
+            return "-", False
+        if target_dir.exists():
+            link_path = format_link(target_dir, report_dir)
+            link_label = target_dir.as_posix()
+            return f"[{link_label}]({link_path})", True
+        return "-", False
+
     lines = []
     lines.append("# 同步报告")
     lines.append("")
     lines.append(f"- 生成时间: {timestamp}")
     lines.append(f"- 根目录: `{root_dir.as_posix()}`")
+    lines.append(f"- 账号数: {len(accounts_sorted)}")
     lines.append(
-        f"- 总计: {total} | 成功: {success_count} | 空: {empty_count} | 失败: {failure_count}"
+        f"- 记录数: {total} | 成功: {success_count} | 空: {empty_count} | 失败: {failure_count}"
     )
+    lines.append("- 说明: 同步目录为本仓库路径，点击可直接跳转。")
     lines.append("")
-    lines.append("| 账号 | Space | 状态 | 同步目录 |")
-    lines.append("| --- | --- | --- | --- |")
+    lines.append("## 账号总览")
+    lines.append("")
+    lines.append("| 账号 | 记录数 | 成功 | 无 Space | 失败 |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for account in accounts_sorted:
+        group = account_groups[account]
+        group_total = len(group)
+        group_success = sum(1 for r in group if r["status"] == "success")
+        group_empty = sum(1 for r in group if r["status"] == "empty")
+        group_failed = sum(1 for r in group if r["status"] == "failed")
+        lines.append(
+            f"| {account} | {group_total} | {group_success} | {group_empty} | {group_failed} |"
+        )
 
-    report_dir = report_path.parent
-    for record in records:
-        account = record["account"]
-        space_id = record.get("space_id") or "-"
-        status = record["status"]
-        if status == "success":
-            status_text = "成功"
-        elif status == "empty":
-            status_text = "无 Space"
-        else:
-            error = normalize_error(record.get("error") or "未知错误")
-            status_text = f"失败: {error}"
+    for account in accounts_sorted:
+        lines.append("")
+        lines.append(f"## 账号: {account}")
+        lines.append("")
+        lines.append("| Space | 状态 | 同步目录 | 详情 |")
+        lines.append("| --- | --- | --- | --- |")
+        group = sorted(account_groups[account], key=record_sort_key)
+        for record in group:
+            space_id = record.get("space_id") or "-"
+            space_name = format_space_name(space_id)
+            status = record["status"]
+            link_text, link_exists = format_target_link(record.get("target_dir"))
 
-        if record.get("target_dir"):
-            link_path = format_link(record["target_dir"], report_dir)
-            link_label = record["target_dir"].as_posix()
-            link_text = f"[{link_label}]({link_path})"
-        else:
-            link_text = "-"
+            if status == "success":
+                status_text = "成功"
+                detail = "-"
+            elif status == "empty":
+                status_text = "无 Space"
+                detail = "该账号暂无 Space"
+            else:
+                status_text = "失败"
+                error = normalize_error(record.get("error") or "未知错误")
+                if link_exists:
+                    detail = f"{error}（目录可能为上次同步内容）"
+                else:
+                    detail = error
 
-        lines.append(f"| {account} | {space_id} | {status_text} | {link_text} |")
+            lines.append(f"| {space_name} | {status_text} | {link_text} | {detail} |")
 
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
